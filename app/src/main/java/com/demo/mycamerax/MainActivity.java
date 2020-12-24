@@ -1,10 +1,18 @@
 package com.demo.mycamerax;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.AspectRatio;
+import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
+import android.util.Size;
+import androidx.camera.core.impl.ImageCaptureConfig;
+import androidx.camera.core.impl.PreviewConfig;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
@@ -17,6 +25,8 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.util.Rational;
+import android.view.OrientationEventListener;
 import android.widget.Toast;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -30,48 +40,80 @@ public class MainActivity extends AppCompatActivity {
     private final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA", "android.permission.READ_EXTERNAL_STORAGE","android.permission.WRITE_EXTERNAL_STORAGE"};
 //private final String[] REQUIRED_PERMISSIONS = new String[]{"android.permission.CAMERA"};
     List<String> mPermissionList = new ArrayList<>();
-    PreviewView mPreview;
-
+    PreviewView mPreviewView;
+    ImageAnalysis mImageAnalysis;
+    CameraSelector cameraSelector;
+    private ListenableFuture<ProcessCameraProvider> cameraProviderFuture;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
 
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        mPreview = findViewById(R.id.view_finder);
+        mPreviewView = findViewById(R.id.view_finder);
 
         if(PermissionUtil.checkMultiPermission(MainActivity.this,REQUIRED_PERMISSIONS,REQUEST_CODE_PERMISSIONS)){
-            startCamera(MainActivity.this);
+            setCamera();
             Log.i("permission", ""+REQUEST_CODE_PERMISSIONS+"已被允许2");// 此处在次获取权限是不会运行的，第二次开始运行此处代码。
         }
     }
 
-    private void startCamera(Context context) {
-        ListenableFuture cameraProviderFuture = ProcessCameraProvider.getInstance(context);
-        cameraProviderFuture.addListener(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    ProcessCameraProvider processCameraProvider = (ProcessCameraProvider) cameraProviderFuture.get();
-                    Preview preview = null;
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                        preview = new Preview.Builder()
-                                .setTargetAspectRatio(AspectRatio.RATIO_16_9)
-                                .setTargetRotation(mPreview.getDisplay().getRotation())
-                                .build();
-                    }
-
-                    preview.setSurfaceProvider(mPreview.getPreviewSurfaceProvider());
-//                    processCameraProvider.bindToLifecycle((LifecycleOwner) context, CameraSelector.DEFAULT_FRONT_CAMERA,preview);
-                    processCameraProvider.bindToLifecycle((LifecycleOwner) context, CameraSelector.DEFAULT_BACK_CAMERA, preview);
-                } catch (ExecutionException e) {
-                    e.printStackTrace();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-
+    private  void setCamera(){
+        cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+        cameraProviderFuture.addListener(() -> {
+            try {
+                ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+//                setPreview(cameraProvider);
+                setImageAnalysis(cameraProvider);
+            } catch (ExecutionException | InterruptedException e) {
+                // No errors need to be handled for this Future.
+                // This should never be reached.
             }
-        }, ContextCompat.getMainExecutor(context));
+        }, ContextCompat.getMainExecutor(this));
+    }
+    void setPreview(@NonNull ProcessCameraProvider cameraProvider) {
+        Preview preview = new Preview.Builder().build();
+
+        cameraSelector = new CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                .build();
+
+        preview.setSurfaceProvider(mPreviewView.getPreviewSurfaceProvider());
+
+        Camera camera = cameraProvider.bindToLifecycle((LifecycleOwner)this, cameraSelector, preview);
+    }
+
+    private void setImageAnalysis(@NonNull ProcessCameraProvider cameraProvider){
+
+        mImageAnalysis = new ImageAnalysis.Builder()
+                        .setTargetResolution(new Size(1280, 720))
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build();
+
+        mImageAnalysis.setAnalyzer(ContextCompat.getMainExecutor(this), new ImageAnalysis.Analyzer() {
+            @Override
+            public void analyze(@NonNull ImageProxy image) {
+                int rotationDegrees = image.getImageInfo().getRotationDegrees();
+                // insert your code here.
+            }
+        });
+
+        OrientationEventListener orientationEventListener = new OrientationEventListener(this) {
+            @Override
+            public void onOrientationChanged(int orientation) {
+//                textView.setText(Integer.toString(orientation));
+            }
+        };
+        orientationEventListener.enable();
+
+        Preview preview = new Preview.Builder().build();
+
+        cameraSelector = new CameraSelector.Builder()
+                .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                .build();
+        preview.setSurfaceProvider(mPreviewView.getPreviewSurfaceProvider());
+        cameraProvider.bindToLifecycle((LifecycleOwner) this, cameraSelector, mImageAnalysis, preview);
     }
 
     // 检查多个权限。返回true表示已完全启用权限，返回false表示未完全启用权限
@@ -102,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
             case REQUEST_CODE_PERMISSIONS:
                 if(grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     Log.i("permission", ""+REQUEST_CODE_PERMISSIONS+"已被允许1");
-                    startCamera(MainActivity.this);
+                    setCamera();
                 }else {
                     Toast.makeText(this, "需要允许camera和SD卡权限才能使用", Toast.LENGTH_SHORT).show();
                 }
